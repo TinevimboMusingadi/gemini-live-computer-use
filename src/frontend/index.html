@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Gemini Live + Computer Use</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <!-- Top bar -->
+  <header id="topbar">
+    <div class="topbar-left">
+      <span class="logo">Gemini Live</span>
+    </div>
+    <div class="topbar-center">
+      <input
+        id="url-input"
+        type="text"
+        placeholder="Enter URL to navigate..."
+        value="https://www.google.com"
+      />
+    </div>
+    <div class="topbar-right">
+      <button id="btn-connect" class="btn btn-primary">Connect</button>
+      <button id="btn-disconnect" class="btn btn-danger" disabled>Disconnect</button>
+    </div>
+  </header>
+
+  <!-- Main area -->
+  <main id="main">
+    <!-- Browser view -->
+    <section id="browser-panel">
+      <div id="browser-view">
+        <img id="browser-screenshot" alt="Browser screenshot will appear here" />
+        <div id="browser-placeholder">
+          <p>Browser view</p>
+          <p class="hint">Click <strong>Connect</strong> to start a session</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Sidebar: transcript + status -->
+    <aside id="sidebar">
+      <div id="transcript-panel">
+        <h3>Conversation</h3>
+        <div id="transcript-list"></div>
+      </div>
+      <div id="actions-panel">
+        <h3>Actions</h3>
+        <div id="actions-list"></div>
+      </div>
+    </aside>
+  </main>
+
+  <!-- Status bar -->
+  <footer id="statusbar">
+    <span id="status-text">Ready</span>
+    <span id="mic-indicator" class="indicator off" title="Microphone"></span>
+  </footer>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
