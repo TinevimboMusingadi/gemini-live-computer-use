@@ -7,10 +7,12 @@ import base64
 import json
 import logging
 import pathlib
+import socket
+import time
 
 import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from google.genai import types
 
@@ -30,10 +32,68 @@ FRONTEND_DIR = pathlib.Path(__file__).resolve().parent.parent / "frontend"
 app = FastAPI(title="Gemini Live + Computer Use Demo")
 app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
 
+_CONNECTIVITY_TARGETS = [
+    ("generativelanguage.googleapis.com", 443),
+    ("dns.google", 443),
+    ("1.1.1.1", 443),
+]
+
+
+async def check_internet() -> dict:
+    """Return a dict with connectivity diagnostics."""
+    start = time.monotonic()
+    reachable: list[str] = []
+    unreachable: list[str] = []
+    for host, port in _CONNECTIVITY_TARGETS:
+        try:
+            _, writer = await asyncio.wait_for(
+                asyncio.open_connection(host, port),
+                timeout=3,
+            )
+            writer.close()
+            await writer.wait_closed()
+            reachable.append(host)
+        except (OSError, asyncio.TimeoutError, socket.error):
+            unreachable.append(host)
+    latency_ms = round((time.monotonic() - start) * 1000)
+
+    gemini_ok = "generativelanguage.googleapis.com" in reachable
+    any_ok = len(reachable) > 0
+    if not any_ok:
+        quality = "offline"
+        message = "No internet connection detected"
+    elif not gemini_ok:
+        quality = "limited"
+        message = (
+            "Internet works but cannot reach Gemini API -- "
+            "possible firewall or DNS issue"
+        )
+    elif latency_ms > 3000:
+        quality = "slow"
+        message = f"Internet is very slow (probe took {latency_ms} ms)"
+    else:
+        quality = "good"
+        message = "Internet connection is healthy"
+
+    return {
+        "quality": quality,
+        "message": message,
+        "latency_ms": latency_ms,
+        "reachable": reachable,
+        "unreachable": unreachable,
+    }
+
 
 @app.get("/")
 async def index():
     return FileResponse(str(FRONTEND_DIR / "index.html"))
+
+
+@app.get("/health")
+async def health():
+    """Lightweight endpoint for frontend connectivity checks."""
+    info = await check_internet()
+    return JSONResponse(info)
 
 
 @app.websocket("/ws")
@@ -160,28 +220,90 @@ async def websocket_endpoint(ws: WebSocket):
 
     async def gemini_receiver() -> None:
         """Keep listening on Gemini; reconnect on transient drops."""
+        consecutive_failures = 0
         while True:
             try:
                 await gemini.receive_loop()
+                consecutive_failures = 0
             except asyncio.CancelledError:
                 return
             except Exception:  # pylint: disable=broad-except
+                consecutive_failures += 1
                 logger.exception("gemini_receiver error")
 
             if not gemini.running:
                 return
-            # Attempt reconnect after a transient drop
-            logger.info("Gemini receive ended -- attempting reconnect")
-            await _send_json({"type": "status", "message": "Reconnecting to Gemini..."})
+
+            net = await check_internet()
+            if net["quality"] == "offline":
+                await _send_json({
+                    "type": "connectivity",
+                    "quality": "offline",
+                    "message": net["message"],
+                })
+                logger.warning("Internet offline -- waiting for recovery")
+                while True:
+                    await asyncio.sleep(3)
+                    net = await check_internet()
+                    if net["quality"] != "offline":
+                        await _send_json({
+                            "type": "connectivity",
+                            "quality": net["quality"],
+                            "message": "Internet restored -- reconnecting",
+                        })
+                        break
+            elif net["quality"] in ("slow", "limited"):
+                await _send_json({
+                    "type": "connectivity",
+                    "quality": net["quality"],
+                    "message": net["message"],
+                })
+            else:
+                await _send_json({
+                    "type": "status",
+                    "message": "Gemini connection dropped -- reconnecting...",
+                })
+
+            logger.info(
+                "Gemini receive ended -- reconnecting (net=%s, failures=%d)",
+                net["quality"],
+                consecutive_failures,
+            )
+            backoff = min(2 ** consecutive_failures, 16)
+            await asyncio.sleep(backoff)
+
             try:
                 await gemini.disconnect()
-                await asyncio.sleep(1)
                 await gemini.connect()
+                await _send_json({
+                    "type": "connectivity",
+                    "quality": "good",
+                    "message": "Reconnected to Gemini",
+                })
                 await _send_json({"type": "status", "message": "Session active"})
             except Exception:  # pylint: disable=broad-except
                 logger.exception("Reconnect failed")
-                await _send_json({"type": "status", "message": "Reconnect failed"})
-                return
+                net2 = await check_internet()
+                if net2["quality"] == "offline":
+                    await _send_json({
+                        "type": "connectivity",
+                        "quality": "offline",
+                        "message": "Reconnect failed -- no internet",
+                    })
+                else:
+                    await _send_json({
+                        "type": "connectivity",
+                        "quality": net2["quality"],
+                        "message": (
+                            f"Reconnect failed (internet is {net2['quality']})"
+                        ),
+                    })
+                if consecutive_failures >= 5:
+                    await _send_json({
+                        "type": "error",
+                        "message": "Too many failures -- please reconnect",
+                    })
+                    return
 
     # ---- Session lifecycle ----
 
