@@ -18,6 +18,10 @@ const transcriptList = document.getElementById("transcript-list");
 const actionsList = document.getElementById("actions-list");
 const statusText = document.getElementById("status-text");
 const micIndicator = document.getElementById("mic-indicator");
+const connBanner = document.getElementById("connectivity-banner");
+const connIcon = document.getElementById("connectivity-icon");
+const connMsg = document.getElementById("connectivity-msg");
+const connDismiss = document.getElementById("connectivity-dismiss");
 
 // ---- State ----
 let ws = null;
@@ -25,6 +29,81 @@ let audioCtx = null;
 let micStream = null;
 let micProcessor = null;
 let nextPlayTime = 0;
+let connectivityPollId = null;
+let bannerAutoHideId = null;
+
+// ---- Connectivity helpers ----
+
+const QUALITY_CONFIG = {
+  offline: { icon: "\u274C", label: "No Internet" },
+  slow: { icon: "\u26A0\uFE0F", label: "Slow Connection" },
+  limited: { icon: "\u26A0\uFE0F", label: "Limited" },
+  good: { icon: "\u2705", label: "Connected" },
+};
+
+function showConnBanner(quality, message) {
+  const cfg = QUALITY_CONFIG[quality] || QUALITY_CONFIG.limited;
+  connBanner.className = "connectivity-banner " + quality;
+  connIcon.textContent = cfg.icon;
+  connMsg.textContent = message;
+
+  if (bannerAutoHideId) clearTimeout(bannerAutoHideId);
+  if (quality === "good") {
+    bannerAutoHideId = setTimeout(() => {
+      connBanner.classList.add("hidden");
+    }, 4000);
+  }
+}
+
+function hideConnBanner() {
+  connBanner.classList.add("hidden");
+}
+
+connDismiss.addEventListener("click", hideConnBanner);
+
+async function checkBackendHealth() {
+  try {
+    const res = await fetch("/health", { signal: AbortSignal.timeout(5000) });
+    if (!res.ok) throw new Error("bad status");
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+function startConnectivityPolling() {
+  stopConnectivityPolling();
+  connectivityPollId = setInterval(async () => {
+    if (!navigator.onLine) {
+      showConnBanner("offline", "Your device is offline -- check your Wi-Fi or ethernet");
+      return;
+    }
+    const info = await checkBackendHealth();
+    if (!info) {
+      showConnBanner(
+        "offline",
+        "Cannot reach the local server -- is it still running?",
+      );
+    } else if (info.quality !== "good") {
+      showConnBanner(info.quality, info.message);
+    }
+  }, 8000);
+}
+
+function stopConnectivityPolling() {
+  if (connectivityPollId) {
+    clearInterval(connectivityPollId);
+    connectivityPollId = null;
+  }
+}
+
+window.addEventListener("offline", () => {
+  showConnBanner("offline", "Your device went offline -- check your internet connection");
+});
+
+window.addEventListener("online", () => {
+  showConnBanner("good", "Back online");
+});
 
 // ---- Helpers ----
 
@@ -154,6 +233,8 @@ function openWebSocket() {
 
   ws.onopen = async () => {
     setStatus("Connected to backend");
+    hideConnBanner();
+    startConnectivityPolling();
     const url = urlInput.value.trim() || "https://www.google.com";
     ws.send(JSON.stringify({ type: "connect", url }));
     try {
@@ -187,6 +268,9 @@ function openWebSocket() {
           "[Safety] " + msg.explanation + " -- Action: " + msg.action,
         );
         break;
+      case "connectivity":
+        showConnBanner(msg.quality, msg.message);
+        break;
       case "status":
         setStatus(msg.message);
         break;
@@ -196,13 +280,41 @@ function openWebSocket() {
     }
   };
 
-  ws.onclose = () => {
-    setStatus("Disconnected");
+  ws.onclose = async () => {
     cleanup();
+    if (!navigator.onLine) {
+      setStatus("Disconnected -- no internet");
+      showConnBanner("offline", "Connection lost -- your internet is down");
+    } else {
+      const info = await checkBackendHealth();
+      if (!info) {
+        setStatus("Disconnected -- server unreachable");
+        showConnBanner("offline", "Cannot reach the server -- is it still running?");
+      } else if (info.quality !== "good") {
+        setStatus("Disconnected -- " + info.message);
+        showConnBanner(info.quality, info.message);
+      } else {
+        setStatus("Disconnected");
+      }
+    }
   };
 
-  ws.onerror = () => {
-    setStatus("WebSocket error");
+  ws.onerror = async () => {
+    if (!navigator.onLine) {
+      setStatus("Connection failed -- no internet");
+      showConnBanner("offline", "No internet connection -- check your Wi-Fi or ethernet");
+    } else {
+      const info = await checkBackendHealth();
+      if (!info) {
+        setStatus("WebSocket error -- server unreachable");
+        showConnBanner("offline", "Cannot reach the local server");
+      } else if (info.quality !== "good") {
+        setStatus("WebSocket error -- " + info.message);
+        showConnBanner(info.quality, info.message);
+      } else {
+        setStatus("WebSocket error");
+      }
+    }
     cleanup();
   };
 }
@@ -217,6 +329,7 @@ function closeWebSocket() {
 
 function cleanup() {
   stopMicrophone();
+  stopConnectivityPolling();
   if (audioCtx) {
     audioCtx.close().catch(() => {});
     audioCtx = null;
