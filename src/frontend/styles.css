@@ -8,16 +8,16 @@
 }
 
 :root {
-  --bg: #0f1117;
-  --surface: #1a1d27;
-  --border: #2a2d3a;
-  --text: #e0e0e6;
-  --text-muted: #8b8fa3;
-  --accent: #4f8ff7;
-  --accent-hover: #6ba1ff;
-  --danger: #e05555;
-  --danger-hover: #f06666;
-  --green: #3ddc84;
+  --bg: #0a0a0a;
+  --surface: #141414;
+  --border: #2e2e2e;
+  --text: #e8e8e8;
+  --text-muted: #9a9a9a;
+  --accent: #c8c8c8;
+  --accent-hover: #ffffff;
+  --danger: #888888;
+  --danger-hover: #aaaaaa;
+  --green: #b0b0b0;
   --radius: 8px;
   --font: "Segoe UI", system-ui, -apple-system, sans-serif;
 }
@@ -53,7 +53,7 @@ body {
   font-size: 16px;
   font-weight: 700;
   letter-spacing: 0.5px;
-  color: var(--accent);
+  color: #ffffff;
 }
 
 .topbar-center {
@@ -98,21 +98,23 @@ body {
 }
 
 .btn-primary {
-  background: var(--accent);
-  color: #fff;
+  background: #ffffff;
+  color: #0a0a0a;
 }
 
 .btn-primary:hover:not(:disabled) {
-  background: var(--accent-hover);
+  background: #e0e0e0;
 }
 
 .btn-danger {
-  background: var(--danger);
-  color: #fff;
+  background: #2e2e2e;
+  color: #c8c8c8;
+  border: 1px solid #444;
 }
 
 .btn-danger:hover:not(:disabled) {
-  background: var(--danger-hover);
+  background: #3a3a3a;
+  color: #fff;
 }
 
 /* ---- Main area ---- */
@@ -203,11 +205,11 @@ body {
 }
 
 .transcript-entry.user strong {
-  color: var(--accent);
+  color: #ffffff;
 }
 
 .transcript-entry.model strong {
-  color: var(--green);
+  color: #9a9a9a;
 }
 
 #actions-panel {
@@ -252,12 +254,70 @@ body {
 }
 
 .indicator.off {
-  background: #555;
+  background: #3a3a3a;
 }
 
 .indicator.on {
-  background: var(--green);
-  box-shadow: 0 0 6px var(--green);
+  background: #ffffff;
+  box-shadow: 0 0 6px rgba(255, 255, 255, 0.4);
+}
+
+/* ---- Connectivity banner ---- */
+.connectivity-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  font-size: 0.9rem;
+  font-weight: 500;
+  border-bottom: 1px solid var(--border);
+  transition: background 0.3s, color 0.3s;
+}
+
+.connectivity-banner.hidden {
+  display: none;
+}
+
+.connectivity-banner.offline {
+  background: #1a1a1a;
+  color: #ff6b6b;
+  border-bottom-color: #ff6b6b33;
+}
+
+.connectivity-banner.slow {
+  background: #1a1a1a;
+  color: #f0c050;
+  border-bottom-color: #f0c05033;
+}
+
+.connectivity-banner.limited {
+  background: #1a1a1a;
+  color: #d0d0d0;
+  border-bottom-color: #d0d0d033;
+}
+
+.connectivity-banner.good {
+  background: #1a1a1a;
+  color: #a0a0a0;
+  border-bottom-color: #2e2e2e;
+}
+
+.connectivity-banner #connectivity-icon {
+  font-size: 1.2rem;
+}
+
+.btn-dismiss {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: inherit;
+  font-size: 1.2rem;
+  cursor: pointer;
+  opacity: 0.7;
+}
+
+.btn-dismiss:hover {
+  opacity: 1;
 }
 
 /* ---- Scrollbar ---- */
