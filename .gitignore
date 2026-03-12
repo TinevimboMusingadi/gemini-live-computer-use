@@ -10,4 +10,5 @@ build/
 .pytest_cache/
 .venv312/
 context_files/
+screenshots/
 .cursor
