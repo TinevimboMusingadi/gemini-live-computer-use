@@ -235,7 +235,7 @@ function openWebSocket() {
     setStatus("Connected to backend");
     hideConnBanner();
     startConnectivityPolling();
-    const url = urlInput.value.trim() || "https://www.google.com";
+    const url = urlInput.value.trim() || "http://localhost:8000/agent-home";
     ws.send(JSON.stringify({ type: "connect", url }));
     try {
       await startMicrophone();
@@ -267,6 +267,9 @@ function openWebSocket() {
           "model",
           "[Safety] " + msg.explanation + " -- Action: " + msg.action,
         );
+        break;
+      case "gallery_update":
+        addAction("gallery", { event: "new image saved" });
         break;
       case "connectivity":
         showConnBanner(msg.quality, msg.message);
