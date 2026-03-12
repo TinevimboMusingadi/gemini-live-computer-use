@@ -107,6 +107,79 @@ _BROWSER_FUNCTIONS: list[dict[str, Any]] = [
         "description": "Wait 5 seconds for the page to load.",
         "parameters": {"type": "object", "properties": {}},
     },
+    {
+        "name": "save_screenshot",
+        "description": (
+            "Capture the current browser view and save it locally. "
+            "Returns the filename you can later pass to analyze_screenshot."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "label": {
+                    "type": "string",
+                    "description": (
+                        "Short label describing the screenshot content."
+                    ),
+                },
+            },
+            "required": ["label"],
+        },
+    },
+    {
+        "name": "analyze_screenshot",
+        "description": (
+            "Send a previously saved screenshot to a Gemini Flash "
+            "sub-agent for detailed visual analysis."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "image_filename": {
+                    "type": "string",
+                    "description": (
+                        "Filename returned by save_screenshot."
+                    ),
+                },
+                "prompt": {
+                    "type": "string",
+                    "description": "What to analyze or ask about the image.",
+                },
+            },
+            "required": ["image_filename", "prompt"],
+        },
+    },
+    {
+        "name": "generate_image",
+        "description": (
+            "Generate an image using Nano Banana (Gemini native image "
+            "generation). Can also edit or remix an existing screenshot "
+            "by providing a reference_filename."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "prompt": {
+                    "type": "string",
+                    "description": (
+                        "Detailed text description of the image to generate."
+                    ),
+                },
+                "label": {
+                    "type": "string",
+                    "description": "Short label for the saved filename.",
+                },
+                "reference_filename": {
+                    "type": "string",
+                    "description": (
+                        "Optional filename from save_screenshot to use "
+                        "as a reference for editing or remixing."
+                    ),
+                },
+            },
+            "required": ["prompt"],
+        },
+    },
 ]
 
 
