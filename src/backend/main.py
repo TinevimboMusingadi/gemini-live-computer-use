@@ -11,14 +11,14 @@ import socket
 import time
 
 import uvicorn
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from google.genai import types
 
-from src.backend import action_executor
+from src.backend import action_executor, screenshot_store, sub_agents
 from src.backend.browser_controller import BrowserController
-from src.backend.config import HOST, PORT, SCREENSHOT_INTERVAL_S
+from src.backend.config import HOST, PORT, SCREENSHOT_INTERVAL_S, SCREENSHOTS_DIR
 from src.backend.gemini_session import GeminiSession
 
 logging.basicConfig(
@@ -30,6 +30,15 @@ logger = logging.getLogger(__name__)
 FRONTEND_DIR = pathlib.Path(__file__).resolve().parent.parent / "frontend"
 
 app = FastAPI(title="Gemini Live + Computer Use Demo")
+
+SCREENSHOTS_DIR.mkdir(parents=True, exist_ok=True)
+(SCREENSHOTS_DIR / "generated").mkdir(parents=True, exist_ok=True)
+
+app.mount(
+    "/screenshots",
+    StaticFiles(directory=str(SCREENSHOTS_DIR)),
+    name="screenshots",
+)
 app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
 
 _CONNECTIVITY_TARGETS = [
@@ -96,6 +105,31 @@ async def health():
     return JSONResponse(info)
 
 
+@app.get("/agent-home")
+async def agent_home():
+    """The custom chat UI the agent opens as its default tab."""
+    return FileResponse(str(FRONTEND_DIR / "agent_home.html"))
+
+
+@app.get("/api/screenshots")
+async def api_screenshots():
+    """Return a JSON list of all saved screenshots and generated images."""
+    return JSONResponse(screenshot_store.list_screenshots())
+
+
+@app.post("/api/upload")
+async def api_upload(file: UploadFile):
+    """Accept an image upload and save it to the screenshots directory."""
+    data = await file.read()
+    ext = (file.filename or "upload.jpg").rsplit(".", 1)[-1]
+    label = (file.filename or "upload").rsplit(".", 1)[0]
+    if ext in ("png", "gif", "webp"):
+        meta = await screenshot_store.save_generated(data, label=label, ext=ext)
+    else:
+        meta = await screenshot_store.save(data, label=label)
+    return JSONResponse(meta)
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
     await ws.accept()
@@ -117,13 +151,14 @@ async def websocket_endpoint(ws: WebSocket):
         encoded = base64.b64encode(pcm).decode()
         asyncio.ensure_future(_send_json({"type": "audio", "data": encoded}))
 
+    _SUB_AGENT_TOOLS = {"save_screenshot", "analyze_screenshot", "generate_image"}
+
     async def _on_tool_call(calls: list[dict]) -> None:
         for call in calls:
             name = call["name"]
             args = call["args"]
             call_id = call["id"]
 
-            # Check for safety_decision requiring confirmation
             safety = args.pop("safety_decision", None)
             if safety and safety.get("decision") == "require_confirmation":
                 await _send_json({
@@ -132,10 +167,8 @@ async def websocket_endpoint(ws: WebSocket):
                     "action": name,
                     "call_id": call_id,
                 })
-                # For v1 demo we auto-skip; a full implementation would
-                # await a user response over the WebSocket.
                 logger.warning(
-                    "Safety confirmation requested for %s -- skipping action",
+                    "Safety confirmation requested for %s -- skipping",
                     name,
                 )
                 fr = types.FunctionResponse(
@@ -146,22 +179,20 @@ async def websocket_endpoint(ws: WebSocket):
                 await gemini.send_tool_response([fr])
                 continue
 
-            await _send_json({
-                "type": "action",
-                "name": name,
-                "args": args,
-            })
+            await _send_json({"type": "action", "name": name, "args": args})
 
-            result = await action_executor.execute_action(
-                browser.page, name, args,
-            )
-            result["url"] = browser.page.url
-
-            screenshot_bytes = await browser.screenshot()
-            await _send_json({
-                "type": "screenshot",
-                "data": base64.b64encode(screenshot_bytes).decode(),
-            })
+            if name in _SUB_AGENT_TOOLS:
+                result = await _handle_sub_agent_tool(name, args)
+            else:
+                result = await action_executor.execute_action(
+                    browser.page, name, args,
+                )
+                result["url"] = browser.page.url
+                screenshot_bytes = await browser.screenshot()
+                await _send_json({
+                    "type": "screenshot",
+                    "data": base64.b64encode(screenshot_bytes).decode(),
+                })
 
             fr = types.FunctionResponse(
                 id=call_id,
@@ -169,6 +200,38 @@ async def websocket_endpoint(ws: WebSocket):
                 response=result,
             )
             await gemini.send_tool_response([fr])
+
+    async def _handle_sub_agent_tool(
+        name: str,
+        args: dict,
+    ) -> dict:
+        if name == "save_screenshot":
+            jpeg = await browser.screenshot()
+            meta = await screenshot_store.save(
+                jpeg,
+                label=args.get("label", ""),
+            )
+            await _send_json({"type": "gallery_update"})
+            return {"result": "Screenshot saved", **meta}
+
+        if name == "analyze_screenshot":
+            result = await sub_agents.analyze_image(
+                image_filename=args["image_filename"],
+                prompt=args["prompt"],
+            )
+            return result
+
+        if name == "generate_image":
+            result = await sub_agents.generate_image(
+                prompt=args["prompt"],
+                label=args.get("label", ""),
+                reference_filename=args.get("reference_filename", ""),
+            )
+            if "url" in result:
+                await _send_json({"type": "gallery_update"})
+            return result
+
+        return {"error": f"Unknown sub-agent tool: {name}"}
 
     def _on_transcription(source: str, text: str) -> None:
         asyncio.ensure_future(
