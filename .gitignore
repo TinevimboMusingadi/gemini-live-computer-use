@@ -12,3 +12,4 @@ build/
 context_files/
 screenshots/
 .cursor
+playwright-profile/
